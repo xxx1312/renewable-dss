@@ -5,9 +5,9 @@ import numpy as np
 from datetime import datetime
 import os
 
-st.set_page_config(page_title="AHP-TOPSIS Decision Tool", layout="centered")
+st.set_page_config(page_title="AHP-TOPSIS Tool", layout="centered")
 
-# --- Session State ---
+# Session State Initialization
 if "step" not in st.session_state:
     st.session_state.step = 0
 if "weights" not in st.session_state:
@@ -18,8 +18,10 @@ if "feedback" not in st.session_state:
     st.session_state.feedback = {}
 if "comment" not in st.session_state:
     st.session_state.comment = ""
+if "editable_weights" not in st.session_state:
+    st.session_state.editable_weights = False
 
-# --- Data Setup ---
+# Static Data
 criteria = ["Cost", "Efficiency", "Environmental Impact", "Social Acceptance"]
 alternatives = ["Solar", "Wind", "Hydro"]
 feedback_questions = [
@@ -29,69 +31,87 @@ feedback_questions = [
     "I would recommend this tool to others."
 ]
 
-# --- Page Flow ---
+# Total Steps
 total_steps = 1 + 1 + len(alternatives)*len(criteria) + len(feedback_questions) + 1
 
-# --- Page 0: Intro ---
+# Progress Bar
+st.progress((st.session_state.step + 1) / total_steps)
+
+# Navigation Buttons
+def nav_buttons():
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.session_state.step > 0:
+            if st.button("⬅️ Previous"):
+                st.session_state.step -= 1
+    with col2:
+        if st.session_state.step < total_steps - 1:
+            if st.button("Next ➡️"):
+                st.session_state.step += 1
+
+# --- Step 0: Welcome ---
 if st.session_state.step == 0:
     st.title("🔋 Renewable Energy Decision Support Tool")
     st.markdown("""
-    Welcome to the AHP-TOPSIS-based decision support tool designed to assist policymakers 
-    in prioritizing renewable energy alternatives.
+    Welcome to this AHP-TOPSIS-based survey tool designed to support renewable energy decision-making in Indonesia.
 
-    This interactive tool allows you to:
-    - Adjust AHP weights for decision criteria
-    - Rate each energy alternative
-    - View an aggregated ranking based on TOPSIS
-    - Provide feedback to improve the tool
+    💡 In this tool:
+    - You will review predefined AHP weights (or adjust them if enabled)
+    - Rate renewable alternatives (Solar, Wind, Hydro)
+    - See aggregated decision results
+    - Provide feedback about your experience
 
     Click **Next** to begin.
     """)
-    if st.button("Next"):
-        st.session_state.step += 1
+    nav_buttons()
 
-# --- Page 1: AHP Weight Adjustment ---
+# --- Step 1: AHP Weights ---
 elif st.session_state.step == 1:
-    st.title("⚖️ Adjust AHP Weights")
-    st.markdown("Use the sliders to adjust importance of each criterion (total must be 1.0).")
+    st.title("⚖️ AHP Criteria Weights")
+    st.markdown("These weights determine the importance of each criterion in the decision-making process.")
+    st.toggle("Enable weight adjustment (for demonstration)", key="editable_weights")
+
     new_weights = []
     total = 0
     for i, crit in enumerate(criteria):
-        weight = st.slider(crit, 0.0, 1.0, st.session_state.weights[i], 0.01, key=f"weight_{i}")
+        default_val = st.session_state.weights[i]
+        disabled = not st.session_state.editable_weights
+        weight = st.slider(crit, 0.0, 1.0, default_val, 0.01, key=f"weight_{i}", disabled=disabled)
         new_weights.append(weight)
         total += weight
-    st.write(f"**Total:** {round(total, 2)} (must equal 1.0)")
-    if total == 1.0 and st.button("Next"):
-        st.session_state.weights = new_weights
-        st.session_state.step += 1
+    st.write(f"**Total Weight:** {round(total, 2)} (should be 1.0)")
 
-# --- Page 2–N: Rate Alternatives ---
+    if not st.session_state.editable_weights or round(total, 2) == 1.0:
+        st.session_state.weights = new_weights
+        nav_buttons()
+    else:
+        st.warning("Total weight must equal 1.0 to proceed.")
+
+# --- Step 2+: Rating Alternatives ---
 elif st.session_state.step < 2 + len(alternatives)*len(criteria):
     idx = st.session_state.step - 2
     alt = alternatives[idx // len(criteria)]
     crit = criteria[idx % len(criteria)]
-    st.header(f"Rate **{alt}** for **{crit}**")
-    score = st.radio("Select a score (1 = Poor, 5 = Excellent)", [1, 2, 3, 4, 5], horizontal=True)
-    if st.button("Next"):
-        key = f"{alt}_{crit}"
-        st.session_state.scores[key] = score
-        st.session_state.step += 1
+    st.header(f"📌 Rate: **{alt}** for **{crit}**")
+    st.markdown("Rate how well this energy source performs under the given criterion.")
+    choice = st.radio("Select a score (1 = Poor, 5 = Excellent)", [1, 2, 3, 4, 5],
+                      horizontal=True, key=f"{alt}_{crit}")
+    st.session_state.scores[f"{alt}_{crit}"] = choice
+    nav_buttons()
 
 # --- Feedback Pages ---
 elif st.session_state.step < 2 + len(alternatives)*len(criteria) + len(feedback_questions):
     fb_idx = st.session_state.step - (2 + len(alternatives)*len(criteria))
     q = feedback_questions[fb_idx]
-    st.header(q)
-    rating = st.radio("Your response", [1, 2, 3, 4, 5], horizontal=True)
-    if st.button("Next"):
-        st.session_state.feedback[q] = rating
-        st.session_state.step += 1
+    st.header(f"💬 Feedback: {q}")
+    st.session_state.feedback[q] = st.radio("Your rating", [1, 2, 3, 4, 5], horizontal=True, key=f"fb_{fb_idx}")
+    nav_buttons()
 
-# --- Comment + Submit ---
+# --- Final Comments + Submit ---
 elif st.session_state.step == total_steps - 1:
-    st.header("💬 Final Comments")
-    st.session_state.comment = st.text_area("Anything you'd like to share?")
-    if st.button("Submit"):
+    st.header("📝 Final Comments")
+    st.session_state.comment = st.text_area("Anything you'd like to share or suggest?", value=st.session_state.comment)
+    if st.button("✅ Submit All"):
         row = {
             "timestamp": datetime.now().isoformat(),
             "comment": st.session_state.comment
@@ -106,12 +126,12 @@ elif st.session_state.step == total_steps - 1:
         df = pd.DataFrame([row])
         file_exists = os.path.exists("user_data.csv")
         df.to_csv("user_data.csv", mode='a', header=not file_exists, index=False)
-        st.success("✅ Submission recorded!")
+        st.success("🎉 Submission recorded! Proceed to view the results.")
         st.session_state.step += 1
 
-# --- Final Page: Aggregated Results ---
+# --- Show Aggregated Results ---
 else:
-    st.title("📈 Aggregated TOPSIS Results")
+    st.title("📊 Aggregated TOPSIS Ranking")
     if os.path.exists("user_data.csv"):
         df_all = pd.read_csv("user_data.csv")
         weights_avg = []
@@ -136,6 +156,7 @@ else:
             "TOPSIS Score": scores
         }).sort_values(by="TOPSIS Score", ascending=False).reset_index(drop=True)
         st.dataframe(topsis_df, use_container_width=True)
-        st.download_button("⬇️ Download Raw Data", df_all.to_csv(index=False), "user_data.csv", "text/csv")
+        st.download_button("⬇️ Download User Data", df_all.to_csv(index=False), "user_data.csv", "text/csv")
+        st.download_button("⬇️ Download TOPSIS Ranking", topsis_df.to_csv(index=False), "topsis_ranking.csv", "text/csv")
     else:
-        st.info("No data yet. Be the first to submit.")
+        st.info("No results available yet. Please submit responses to populate the ranking.")
