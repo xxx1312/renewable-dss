@@ -1,116 +1,103 @@
-# Streamlit AHP + TOPSIS Decision Support Tool for Renewable Energy
+
 import streamlit as st
-import numpy as np
 import pandas as pd
-import plotly.express as px
+import numpy as np
+from datetime import datetime
+import os
 
-st.set_page_config(page_title="Renewable Energy Prioritization Tool", layout="wide")
-st.title("🌿 AHP + TOPSIS Decision Support Tool for Renewable Energy")
+st.set_page_config(page_title="AHP-TOPSIS Multi-user Decision Tool", layout="centered")
 
-# -------------------- USER INPUT --------------------
-st.header("1️⃣ Define Criteria and Alternatives")
+st.title("🔋 Renewable Energy Decision Support Tool")
+st.write("This tool helps prioritize renewable energy alternatives using AHP-TOPSIS. Your input contributes to an aggregated decision ranking.")
 
-criteria = st.multiselect("Enter Criteria (e.g., Cost, Emissions, Potential):",
-                          options=[],
-                          default=["Cost", "Capacity Factor", "Resource Potential"])
+# --- AHP Weights (fixed) ---
+criteria = ["Cost", "Efficiency", "Environmental Impact", "Social Acceptance"]
+weights = np.array([0.3, 0.25, 0.25, 0.2])
+st.subheader("📊 AHP Weights (Predefined)")
+for c, w in zip(criteria, weights):
+    st.write(f"- **{c}**: {w}")
 
-alternatives = st.text_area("Enter Alternatives (one per line):", "Solar PV\nWind\nHydro")
-alternatives = [alt.strip() for alt in alternatives.split("\n") if alt.strip()]
+# --- User TOPSIS Input ---
+st.subheader("📝 Rate Each Alternative (1 = Poor, 5 = Excellent)")
 
-if len(criteria) < 2 or len(alternatives) < 2:
-    st.warning("Please enter at least 2 criteria and 2 alternatives.")
-    st.stop()
+alternatives = ["Solar", "Wind", "Hydro"]
+user_scores = {}
 
-# -------------------- AHP PAIRWISE INPUT --------------------
-st.header("2️⃣ Pairwise Comparison Matrix (AHP)")
-st.write("Provide judgments to compare the importance of criteria (1–9 scale). Reciprocal values are auto-filled.")
-
-n = len(criteria)
-pairwise_matrix = np.ones((n, n))
-
-ahp_table = pd.DataFrame(pairwise_matrix, columns=criteria, index=criteria)
-
-for i in range(n):
-    for j in range(i+1, n):
-        val = st.number_input(f"How much more important is '{criteria[i]}' over '{criteria[j]}'? (1–9)",
-                              min_value=1.0, max_value=9.0, value=1.0, step=0.1,
-                              key=f"pc_{i}_{j}")
-        ahp_table.iloc[i, j] = val
-        ahp_table.iloc[j, i] = 1 / val
-
-# AHP Calculations
-norm_matrix = ahp_table / ahp_table.sum(axis=0)
-weights = norm_matrix.mean(axis=1)
-weighted_sum = ahp_table @ weights
-lambda_max = (weighted_sum / weights).mean()
-ci = (lambda_max - n) / (n - 1)
-ri_dict = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
-ri = ri_dict.get(n, 1.49)
-cr = ci / ri if ri else 0
-
-st.subheader("Criteria Weights (from AHP)")
-st.dataframe(weights.round(4).to_frame(name="Weight"))
-st.markdown(f"**Consistency Ratio (CR):** {cr:.4f} " + ("✅ Acceptable" if cr < 0.1 else "⚠️ Review your inputs"))
-
-# -------------------- TOPSIS MATRIX --------------------
-st.header("3️⃣ Enter Performance Matrix (TOPSIS)")
-st.write("Fill in the performance of each alternative under each criterion.")
-
-performance_data = []
 for alt in alternatives:
-    row = []
-    for crit in criteria:
-        val = st.number_input(f"{alt} – {crit}", value=1.0, step=0.1,
-                              key=f"perf_{alt}_{crit}")
-        row.append(val)
-    performance_data.append(row)
+    user_scores[alt] = []
+    st.markdown(f"**{alt}**")
+    cols = st.columns(len(criteria))
+    for i, crit in enumerate(criteria):
+        with cols[i]:
+            score = st.selectbox(
+                f"{crit} ({alt})",
+                [1, 2, 3, 4, 5],
+                key=f"{alt}_{crit}"
+            )
+            user_scores[alt].append(score)
 
-decision_matrix = pd.DataFrame(performance_data, columns=criteria, index=alternatives)
+# --- Likert Scale Feedback ---
+st.subheader("💬 App Feedback (1 = Strongly Disagree, 5 = Strongly Agree)")
 
-# Determine Benefit/Cost Criteria
-st.subheader("Define Criteria Type")
-criterion_types = {}
-for crit in criteria:
-    ctype = st.radio(f"{crit} is a...", ["Benefit (more is better)", "Cost (less is better)"],
-                     key=f"type_{crit}")
-    criterion_types[crit] = (ctype == "Benefit (more is better)")
+feedback_questions = [
+    "The tool is easy to use.",
+    "I understand how my inputs affect the result.",
+    "The app is useful for decision-making.",
+    "I would recommend this tool to others."
+]
 
-# -------------------- TOPSIS CALCULATION --------------------
-st.header("4️⃣ TOPSIS Ranking")
+feedback_responses = {}
+for q in feedback_questions:
+    feedback_responses[q] = st.slider(q, 1, 5, 3)
 
-# Normalize
-norm = decision_matrix / np.sqrt((decision_matrix**2).sum())
-# Weighted
-weighted = norm * weights.values
+comments = st.text_area("Additional comments or suggestions")
 
-# Ideal & Anti-Ideal
-ideal = weighted.copy()
-anti_ideal = weighted.copy()
-for crit in criteria:
-    if criterion_types[crit]:  # benefit
-        ideal[crit] = weighted[crit].max()
-        anti_ideal[crit] = weighted[crit].min()
-    else:  # cost
-        ideal[crit] = weighted[crit].min()
-        anti_ideal[crit] = weighted[crit].max()
+if st.button("Submit"):
+    # Save input
+    result = {
+        "timestamp": datetime.now().isoformat(),
+        "comments": comments
+    }
+    for q in feedback_questions:
+        result[q] = feedback_responses[q]
+    for alt in alternatives:
+        for i, crit in enumerate(criteria):
+            result[f"{alt}_{crit}"] = user_scores[alt][i]
 
-# Distances
-d_pos = np.sqrt(((weighted - ideal) ** 2).sum(axis=1))
-d_neg = np.sqrt(((weighted - anti_ideal) ** 2).sum(axis=1))
-scores = d_neg / (d_pos + d_neg)
+    df = pd.DataFrame([result])
+    file_exists = os.path.exists("user_data.csv")
+    df.to_csv("user_data.csv", mode='a', header=not file_exists, index=False)
+    st.success("✅ Your input has been submitted. Thank you!")
 
-results = pd.DataFrame({
-    "Alternative": alternatives,
-    "TOPSIS Score": scores,
-    "Rank": scores.rank(ascending=False).astype(int)
-}).sort_values("TOPSIS Score", ascending=False).reset_index(drop=True)
+# --- Aggregated TOPSIS Calculation ---
+st.subheader("📈 Aggregated TOPSIS Ranking")
 
-st.subheader("Final Ranking")
-st.dataframe(results)
+if os.path.exists("user_data.csv"):
+    df_all = pd.read_csv("user_data.csv")
+    matrix = []
 
-fig = px.bar(results, x="Alternative", y="TOPSIS Score", color="TOPSIS Score",
-             color_continuous_scale="Aggrnyl", text_auto=True)
-fig.update_layout(yaxis_title="Score", xaxis_title="Alternative")
-st.plotly_chart(fig, use_container_width=True)
+    for alt in alternatives:
+        alt_scores = []
+        for crit in criteria:
+            alt_scores.append(df_all[f"{alt}_{crit}"].astype(float).mean())
+        matrix.append(alt_scores)
 
-st.success("🎉 Done! You can now export this or deploy it on Streamlit Cloud.")
+    matrix = np.array(matrix)
+    norm_matrix = matrix / np.sqrt((matrix**2).sum(axis=0))
+    weighted_matrix = norm_matrix * weights
+
+    ideal_best = weighted_matrix.max(axis=0)
+    ideal_worst = weighted_matrix.min(axis=0)
+
+    distances_best = np.linalg.norm(weighted_matrix - ideal_best, axis=1)
+    distances_worst = np.linalg.norm(weighted_matrix - ideal_worst, axis=1)
+
+    scores = distances_worst / (distances_best + distances_worst)
+    topsis_df = pd.DataFrame({
+        "Alternative": alternatives,
+        "TOPSIS Score": scores
+    }).sort_values(by="TOPSIS Score", ascending=False).reset_index(drop=True)
+
+    st.table(topsis_df)
+else:
+    st.info("No user input yet. Be the first to submit!")
